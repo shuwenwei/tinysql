@@ -215,11 +215,10 @@ func onAddColumn(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, err error)
 		adjustColumnInfoInAddColumn(tblInfo, offset)
 		columnInfo.State = model.StatePublic
 		ver, err = updateVersionAndTableInfo(t, job, tblInfo, originalState != columnInfo.State)
-		if job.IsRollingback() {
-			job.FinishTableJob(model.JobStateRollbackDone, model.StatePublic, ver, tblInfo)
-		} else {
-			job.FinishTableJob(model.JobStateDone, model.StatePublic, ver, tblInfo)
+		if err != nil {
+			return ver, errors.Trace(err)
 		}
+		job.FinishTableJob(model.JobStateDone, model.StatePublic, ver, tblInfo)
 	default:
 		err = ErrInvalidDDLState.GenWithStackByArgs("column", columnInfo.State)
 	}
