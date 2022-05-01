@@ -377,5 +377,17 @@ func updateVersionAndTableInfo(t *meta.Meta, job *model.Job, tblInfo *model.Tabl
 	ver int64, err error) {
 	// TODO complete this function.
 
+	ver, err = t.GetSchemaVersion()
+	if err != nil {
+		return ver, errors.Trace(err)
+	}
+	if shouldUpdateVer {
+		ver, err = updateSchemaVersion(t, job)
+		if err != nil {
+			return ver, errors.Trace(err)
+		}
+	}
+	tblInfo.UpdateTS = t.StartTS
+	err = t.UpdateTable(job.SchemaID, tblInfo)
 	return ver, errors.Trace(err)
 }
