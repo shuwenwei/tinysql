@@ -366,7 +366,47 @@ func (p *LogicalProjection) PredicatePushDown(predicates []expression.Expression
 // Hints:
 //   1. predicates need to be discussed in two types: expression.Constant and expression.ScalarFunction
 func (la *LogicalAggregation) PredicatePushDown(predicates []expression.Expression) (ret []expression.Expression, retPlan LogicalPlan) {
-	return predicates, la
+	toPushPredicates := make([]expression.Expression, 0, len(predicates))
+	ret = make([]expression.Expression, 0, len(predicates))
+
+	exprsOriginal := make([]expression.Expression, len(la.AggFuncs))
+	for _, aggFunc := range la.AggFuncs {
+		exprsOriginal = append(exprsOriginal, aggFunc.Args[0])
+	}
+	groupByColumnsMap := make(map[int64]bool)
+	for i := 0; i < len(la.groupByCols); i++ {
+		uniqueId := la.groupByCols[i].UniqueID
+		groupByColumnsMap[uniqueId] = true
+	}
+	for _, expr := range predicates {
+		switch expr.(type) {
+		case *expression.Constant:
+			toPushPredicates = append(toPushPredicates, expr)
+			ret = append(ret, expr)
+			break
+		case *expression.ScalarFunction:
+			extractColumns := expression.ExtractColumns(expr)
+			canPushDown := true
+			for _, col := range extractColumns {
+				if _, exists := groupByColumnsMap[col.UniqueID]; !exists {
+					canPushDown = false
+					break
+				}
+			}
+			if canPushDown {
+				// 转换成新的predicate语句
+				newExpr := expression.ColumnSubstitute(expr, la.Schema(), exprsOriginal)
+				toPushPredicates = append(toPushPredicates, newExpr)
+			} else {
+				ret = append(ret, expr)
+			}
+			break
+		default:
+			ret = append(ret, expr)
+		}
+	}
+	la.baseLogicalPlan.PredicatePushDown(toPushPredicates)
+	return ret, la
 }
 
 // PredicatePushDown implements LogicalPlan PredicatePushDown interface.
