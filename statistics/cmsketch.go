@@ -14,7 +14,9 @@
 package statistics
 
 import (
+	"github.com/cznic/sortutil"
 	"reflect"
+	"sort"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/sessionctx/stmtctx"
@@ -50,6 +52,12 @@ func (c *CMSketch) InsertBytes(bytes []byte) {
 // insertBytesByCount adds the bytes value into the TopN (if value already in TopN) or CM Sketch by delta, this does not updates c.defaultValue.
 func (c *CMSketch) insertBytesByCount(bytes []byte, count uint64) {
 	// TODO: implement the insert method.
+	h1, h2 := murmur3.Sum128(bytes)
+	for i := range c.table {
+		j := (h1 + h2 * uint64(i)) % uint64(c.width)
+		c.table[i][j] += uint32(count)
+	}
+	c.count += count
 }
 
 func (c *CMSketch) queryValue(sc *stmtctx.StatementContext, val types.Datum) (uint64, error) {
@@ -68,7 +76,22 @@ func (c *CMSketch) QueryBytes(d []byte) uint64 {
 
 func (c *CMSketch) queryHashValue(h1, h2 uint64) uint64 {
 	// TODO: implement the query method.
-	return uint64(0)
+	// Count-Mean-Min Sketch
+	e := make([]uint64, c.depth)
+	for i := range c.table {
+		j := (h1 + h2 * uint64(i)) % uint64(c.width)
+		counter := uint64(c.table[i][j])
+		if counter <= 0 {
+			continue
+		}
+		noiseEstimation := uint64(c.count - counter) / uint64(c.width - 1)
+		if counter <= noiseEstimation {
+			continue
+		}
+		e[i] = counter - noiseEstimation
+	}
+	sort.Sort(sortutil.Uint64Slice(e))
+	return e[(c.depth - 1) / 2] + (e[c.depth / 2] - e[(c.depth - 1) / 2]) / 2
 }
 
 // MergeCMSketch merges two CM Sketch.
