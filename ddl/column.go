@@ -263,6 +263,9 @@ func onDropColumn(t *meta.Meta, job *model.Job) (ver int64, _ error) {
 		colInfo.State = model.StateWriteOnly
 		// 调整这一列到最后offset
 		adjustColumnInfoInDropColumn(tblInfo, colInfo.Offset)
+		if colInfo.OriginDefaultValue == nil && mysql.HasNotNullFlag(colInfo.Flag) {
+			colInfo.OriginDefaultValue, _ = generateOriginDefaultValue(colInfo)
+		}
 		ver, err = updateVersionAndTableInfoWithCheck(t, job, tblInfo, originalState != colInfo.State)
 	case model.StateWriteOnly:
 		// To be filled

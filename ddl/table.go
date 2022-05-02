@@ -380,7 +380,7 @@ func updateVersionAndTableInfo(t *meta.Meta, job *model.Job, tblInfo *model.Tabl
 	if shouldUpdateVer {
 		ver, err = updateSchemaVersion(t, job)
 		if err != nil {
-			return ver, errors.Trace(err)
+			return 0, errors.Trace(err)
 		}
 	}
 	tblInfo.UpdateTS = t.StartTS
