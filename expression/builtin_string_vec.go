@@ -88,5 +88,28 @@ func (b *builtinLengthSig) vectorized() bool {
 // See https://dev.mysql.com/doc/refman/5.7/en/string-functions.html
 func (b *builtinLengthSig) vecEvalInt(input *chunk.Chunk, result *chunk.Column) error {
 	/* Your code here */
+	n := input.NumRows()
+	// 分配buf
+	buf, err := b.bufAllocator.get(types.ETString, n)
+	if err != nil {
+		return err
+	}
+	// 释放buf
+	defer b.bufAllocator.put(buf)
+	// 执行子运算符
+	if err := b.args[0].VecEvalString(b.ctx, input, buf); err != nil {
+		return err
+	}
+
+	// 设置result类型
+	result.ResizeInt64(n, false)
+	result.MergeNulls(buf)
+	i64s := result.Int64s()
+	for i := 0; i < n; i++ {
+		if buf.IsNull(i) {
+			continue
+		}
+		i64s[i] = int64(len([]byte(buf.GetBytes(i))))
+	}
 	return nil
 }
