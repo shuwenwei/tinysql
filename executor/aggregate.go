@@ -15,6 +15,7 @@ package executor
 
 import (
 	"context"
+	"github.com/spaolacci/murmur3"
 	"sync"
 
 	"github.com/cznic/mathutil"
@@ -353,6 +354,23 @@ func (w *HashAggPartialWorker) updatePartialResult(ctx sessionctx.Context, sc *s
 // We only support parallel execution for single-machine, so process of encode and decode can be skipped.
 func (w *HashAggPartialWorker) shuffleIntermData(sc *stmtctx.StatementContext, finalConcurrency int) {
 	// TODO: implement the method body. Shuffle the data to final workers.
+	groupKeyToFinalWorkers := make([][]string, finalConcurrency)
+	for k := range w.partialResultsMap {
+		shuffle := murmur3.Sum32([]byte(k)) % uint32(finalConcurrency)
+		if groupKeyToFinalWorkers[shuffle] == nil {
+			groupKeyToFinalWorkers[shuffle] = []string{}
+		}
+		groupKeyToFinalWorkers[shuffle] = append(groupKeyToFinalWorkers[shuffle], k)
+	}
+	for i := range groupKeyToFinalWorkers {
+		if groupKeyToFinalWorkers[i] == nil {
+			continue
+		}
+		w.outputChs[i] <- &HashAggIntermData {
+			groupKeys:        groupKeyToFinalWorkers[i],
+			partialResultMap: w.partialResultsMap,
+		}
+	}
 }
 
 // getGroupKey evaluates the group items and args of aggregate functions.
@@ -423,6 +441,32 @@ func (w *HashAggFinalWorker) getPartialInput() (input *HashAggIntermData, ok boo
 
 func (w *HashAggFinalWorker) consumeIntermData(sctx sessionctx.Context) (err error) {
 	// TODO: implement the method body. This method consumes the data given by the partial workers.
+
+	var intermData *HashAggIntermData
+	ok := true
+	for {
+		intermData, ok = w.getPartialInput()
+		if !ok {
+			break
+		}
+		for i := range intermData.groupKeys {
+			w.groupKeys = append(w.groupKeys, []byte(intermData.groupKeys[i]))
+		}
+		results := w.getPartialResult(sctx.GetSessionVars().StmtCtx, w.groupKeys, w.partialResultMap)
+		for i := range intermData.groupKeys {
+			key := intermData.groupKeys[i]
+			if !w.groupSet.Exist(key) {
+				w.groupSet.Insert(key)
+			}
+			for j := range w.aggFuncs {
+				aggFunc := w.aggFuncs[j]
+				err = aggFunc.MergePartialResult(sctx, intermData.partialResultMap[key][j], results[i][j])
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
 	return nil
 }
 
